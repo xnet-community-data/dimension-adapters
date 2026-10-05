@@ -107,7 +107,7 @@ const adapter: SimpleAdapter = {
 
   methodology: {
     Fees:
-      "Accrual-basis carrier WiFi offload service fees. Daily values follow measured XNET network offload. Settlement-confirmed service months are reconciled exactly to confirmed carrier revenue and distributed across their actual daily offload pattern. Closed unsettled months use XNET's official projected WiFi revenue provisionally. Newer days use measured offload multiplied by the latest conservative effective revenue-per-API-GB rate, calibrated from the latest complete month and capped at the published blended billing rate. Provisional values are replaced and historically reconciled when official monthly projections or carrier settlements arrive.",
+      "Accrual-basis carrier WiFi offload service fees. Daily values follow measured XNET network offload. Settlement-confirmed service months are reconciled exactly to confirmed carrier revenue and distributed across their actual daily offload pattern. Closed unsettled months use XNET's official projected WiFi revenue provisionally. Newer days use measured offload multiplied by the latest conservative effective revenue-per-API-GB rate, calibrated from the latest complete month and capped at the published blended billing rate. During a short trailing offload-API outage of at most 14 completed days, missing trailing days can be provisionally imputed from the latest seven measured days; those rows are explicitly flagged in the source feed and replaced when measured observations resume. Provisional values are replaced and historically reconciled when official monthly projections or carrier settlements arrive.",
 
     Revenue: "Same as Fees.",
 
