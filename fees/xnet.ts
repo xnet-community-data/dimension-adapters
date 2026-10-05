@@ -32,7 +32,11 @@ const fetch = async (options: FetchOptions) => {
     throw new Error("Unexpected XNET revenue feed response");
   }
 
-  const rows = response.data.filter((row) => row.date === options.dateString);
+  const serviceMonth = options.dateString.slice(0, 7);
+  const rows = response.data.filter((row) => row.service_month === serviceMonth);
+
+  const [year, month] = serviceMonth.split("-").map(Number);
+  const daysInServiceMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
 
   const toFiniteNumber = (value: unknown, field: string) => {
     if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -41,15 +45,23 @@ const fetch = async (options: FetchOptions) => {
     return value;
   };
 
-  const feesUsd = rows.reduce(
+  const monthlyFeesUsd = rows.reduce(
     (sum, row) => sum + toFiniteNumber(row.fees_usd, "fees_usd"),
     0,
   );
 
-  const userFeesUsd = rows.reduce(
+  const monthlyUserFeesUsd = rows.reduce(
     (sum, row) => sum + toFiniteNumber(row.user_fees_usd, "user_fees_usd"),
     0,
   );
+
+  // XNET's carrier settlements confirm service-month revenue after the
+  // underlying WiFi offload activity occurred. Once a service month is
+  // confirmed, spread that confirmed amount evenly across the calendar days
+  // of the service month so daily/7d/30d comparisons reflect service accrual
+  // rather than an artificial month-end spike.
+  const feesUsd = monthlyFeesUsd / daysInServiceMonth;
+  const userFeesUsd = monthlyUserFeesUsd / daysInServiceMonth;
 
   const postXip12 = options.dateString >= XIP12_EFFECTIVE_DATE;
 
@@ -98,9 +110,10 @@ const fetch = async (options: FetchOptions) => {
 const adapter: SimpleAdapter = {
   version: 2,
 
-  // XNET's public source provides monthly service-period accounting,
-  // not hourly observations. Daily execution avoids repeating the same
-  // monthly accrual in each of the day's 24 hourly windows.
+  // XNET's public source provides settlement-confirmed monthly service-period
+  // accounting, not hourly observations. Confirmed service-month totals are
+  // prorated over their calendar days to create a faithful daily accrual
+  // series without introducing projected/unsettled revenue.
   pullHourly: false,
 
   fetch,
@@ -108,7 +121,8 @@ const adapter: SimpleAdapter = {
   start: "2024-09-29",
 
   methodology: {
-    Fees: "Settlement-confirmed carrier WiFi offload service revenue attributed to the underlying service month and recognized on the final calendar day of that month.",
+    Fees:
+      "Settlement-confirmed carrier WiFi offload service revenue attributed to the underlying service month and distributed evenly across the calendar days of that service month. Historical daily values can be backfilled when a later carrier settlement confirms an earlier service period. Projected and unsettled revenue is excluded.",
 
     Revenue: "Same as Fees.",
 
@@ -122,7 +136,7 @@ const adapter: SimpleAdapter = {
   breakdownMethodology: {
     Fees: {
       [METRIC.SERVICE_FEES]:
-        "Settlement-confirmed carrier WiFi offload service fees reconciled to the underlying service month.",
+        "Settlement-confirmed carrier WiFi offload service fees reconciled to the underlying service month and prorated evenly across its calendar days.",
     },
 
     Revenue: {
