@@ -8,36 +8,36 @@ const REVENUE_URL =
   "xnet-community-data/xnet-data-integration/main/data/xnet_defillama_revenue.json";
 
 const XIP12_EFFECTIVE_DATE = "2025-05-22";
-const SERVICE_REVENUE_SAFE_THROUGH = "2026-07-31";
 
 const OPERATIONS_REVENUE = "Operations";
 const PROTOCOL_OWNED_LIQUIDITY = "Protocol-owned liquidity";
 
-interface RevenueRow {
+interface DailyRevenueRow {
   date: string;
   service_month: string;
+  offload_gb: number;
   fees_usd: number;
   user_fees_usd: number;
-  payment_received_date: string;
+  basis: string;
+  rate_usd_per_api_gb?: number;
+  rate_source_month?: string;
 }
 
 interface RevenueFeed {
   schema_version: number;
-  data: RevenueRow[];
+  daily_data: DailyRevenueRow[];
 }
 
 const fetch = async (options: FetchOptions) => {
-  if (options.dateString > SERVICE_REVENUE_SAFE_THROUGH) {
-    return {};
-  }
-
   const response: RevenueFeed = await fetchURL(REVENUE_URL);
 
-  if (!response || !Array.isArray(response.data)) {
-    throw new Error("Unexpected XNET revenue feed response");
+  if (!response || !Array.isArray(response.daily_data)) {
+    throw new Error("Unexpected XNET daily revenue feed response");
   }
 
-  const rows = response.data.filter((row) => row.date === options.dateString);
+  const rows = response.daily_data.filter(
+    (row) => row.date === options.dateString,
+  );
 
   const toFiniteNumber = (value: unknown, field: string) => {
     if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -59,9 +59,7 @@ const fetch = async (options: FetchOptions) => {
   const postXip12 = options.dateString >= XIP12_EFFECTIVE_DATE;
 
   const holdersRevenueUsd = feesUsd * (postXip12 ? 0.6 : 0.8);
-
   const operationsRevenueUsd = feesUsd * 0.2;
-
   const liquidityRevenueUsd = postXip12 ? feesUsd * 0.2 : 0;
 
   const dailyFees = options.createBalances();
@@ -72,11 +70,8 @@ const fetch = async (options: FetchOptions) => {
 
   if (feesUsd > 0) {
     dailyFees.addUSDValue(feesUsd, METRIC.SERVICE_FEES);
-
     dailyRevenue.addUSDValue(feesUsd, METRIC.SERVICE_FEES);
-
     dailyHoldersRevenue.addUSDValue(holdersRevenueUsd, METRIC.TOKEN_BUY_BACK);
-
     dailyProtocolRevenue.addUSDValue(operationsRevenueUsd, OPERATIONS_REVENUE);
 
     if (liquidityRevenueUsd > 0) {
@@ -102,38 +97,35 @@ const fetch = async (options: FetchOptions) => {
 
 const adapter: SimpleAdapter = {
   version: 2,
-
-  // XNET's public source provides monthly service-period accounting,
-  // not hourly observations. Daily execution avoids repeating the same
-  // monthly accrual in each of the day's 24 hourly windows.
   pullHourly: false,
-
   fetch,
   chains: [CHAIN.OFF_CHAIN],
-  start: "2024-09-30",
+
+  // DeFiLlama treats start as a lower boundary. The first XNET daily accrual
+  // is 2024-09-01, so step back one day to ensure it is included.
+  start: "2024-08-31",
 
   methodology: {
-    Fees: "Settlement-confirmed carrier WiFi offload service revenue attributed to the underlying service month and recognized on the final calendar day of that month.",
+    Fees:
+      "Carriers pay XNET for mobile data offloaded onto WiFi. Until payment arrives, fees are conservatively estimated from daily offload. Payments typically arrive about two months later; historical estimates are then reconciled to the amount actually paid.",
 
-    Revenue:
-      "Settlement-confirmed carrier WiFi offload service revenue retained within the XNET ecosystem. Revenue is allocated between token-holder value accrual and protocol-controlled uses.",
+    Revenue: "Same as Fees.",
 
     HoldersRevenue:
-      "Historically, 80% of carrier revenue was allocated to XNET market buybacks and burns. Under XIP-12, this was split so that 60% continues to fund XNET buyback-and-burn while 20 percentage points were redirected to protocol-owned liquidity to bolster XNET liquidity.",
+      "Share of carrier revenue allocated to XNET buybacks and burns: historically 80%, and 60% since XIP-12.",
 
     ProtocolRevenue:
-      "Historically, 20% of carrier revenue was allocated to operations. Under XIP-12, Protocol Revenue is 40%: 20% for protocol-owned liquidity and 20% for operations. The liquidity allocation remains Protocol Revenue even when part of it is used to acquire XNET for the XNET side of protocol-owned liquidity.",
+      "Share of carrier revenue retained for operations and protocol-owned liquidity: historically 20%, and 40% since XIP-12.",
   },
 
   breakdownMethodology: {
     Fees: {
       [METRIC.SERVICE_FEES]:
-        "Settlement-confirmed carrier WiFi offload service fees reconciled to the underlying service month.",
+        "Carrier WiFi offload fees estimated from daily offload until settlement, then reconciled to the carrier amount actually paid.",
     },
 
     Revenue: {
-      [METRIC.SERVICE_FEES]:
-        "Carrier WiFi offload service revenue retained within the XNET ecosystem.",
+      [METRIC.SERVICE_FEES]: "Same as Fees.",
     },
 
     HoldersRevenue: {
