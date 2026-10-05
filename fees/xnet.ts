@@ -12,31 +12,32 @@ const XIP12_EFFECTIVE_DATE = "2025-05-22";
 const OPERATIONS_REVENUE = "Operations";
 const PROTOCOL_OWNED_LIQUIDITY = "Protocol-owned liquidity";
 
-interface RevenueRow {
+interface DailyRevenueRow {
   date: string;
   service_month: string;
+  offload_gb: number;
   fees_usd: number;
   user_fees_usd: number;
-  payment_received_date: string | null;
+  basis: string;
+  rate_usd_per_api_gb?: number;
+  rate_source_month?: string;
 }
 
 interface RevenueFeed {
   schema_version: number;
-  data: RevenueRow[];
+  daily_data: DailyRevenueRow[];
 }
 
 const fetch = async (options: FetchOptions) => {
   const response: RevenueFeed = await fetchURL(REVENUE_URL);
 
-  if (!response || !Array.isArray(response.data)) {
-    throw new Error("Unexpected XNET revenue feed response");
+  if (!response || !Array.isArray(response.daily_data)) {
+    throw new Error("Unexpected XNET daily revenue feed response");
   }
 
-  const serviceMonth = options.dateString.slice(0, 7);
-  const rows = response.data.filter((row) => row.service_month === serviceMonth);
-
-  const [year, month] = serviceMonth.split("-").map(Number);
-  const daysInServiceMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const rows = response.daily_data.filter(
+    (row) => row.date === options.dateString,
+  );
 
   const toFiniteNumber = (value: unknown, field: string) => {
     if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -45,30 +46,20 @@ const fetch = async (options: FetchOptions) => {
     return value;
   };
 
-  const monthlyFeesUsd = rows.reduce(
+  const feesUsd = rows.reduce(
     (sum, row) => sum + toFiniteNumber(row.fees_usd, "fees_usd"),
     0,
   );
 
-  const monthlyUserFeesUsd = rows.reduce(
+  const userFeesUsd = rows.reduce(
     (sum, row) => sum + toFiniteNumber(row.user_fees_usd, "user_fees_usd"),
     0,
   );
 
-  // XNET's carrier settlements confirm service-month revenue after the
-  // underlying WiFi offload activity occurred. Once a service month is
-  // confirmed, spread that confirmed amount evenly across the calendar days
-  // of the service month so daily/7d/30d comparisons reflect service accrual
-  // rather than an artificial month-end spike.
-  const feesUsd = monthlyFeesUsd / daysInServiceMonth;
-  const userFeesUsd = monthlyUserFeesUsd / daysInServiceMonth;
-
   const postXip12 = options.dateString >= XIP12_EFFECTIVE_DATE;
 
   const holdersRevenueUsd = feesUsd * (postXip12 ? 0.6 : 0.8);
-
   const operationsRevenueUsd = feesUsd * 0.2;
-
   const liquidityRevenueUsd = postXip12 ? feesUsd * 0.2 : 0;
 
   const dailyFees = options.createBalances();
@@ -79,11 +70,8 @@ const fetch = async (options: FetchOptions) => {
 
   if (feesUsd > 0) {
     dailyFees.addUSDValue(feesUsd, METRIC.SERVICE_FEES);
-
     dailyRevenue.addUSDValue(feesUsd, METRIC.SERVICE_FEES);
-
     dailyHoldersRevenue.addUSDValue(holdersRevenueUsd, METRIC.TOKEN_BUY_BACK);
-
     dailyProtocolRevenue.addUSDValue(operationsRevenueUsd, OPERATIONS_REVENUE);
 
     if (liquidityRevenueUsd > 0) {
@@ -109,20 +97,17 @@ const fetch = async (options: FetchOptions) => {
 
 const adapter: SimpleAdapter = {
   version: 2,
-
-  // XNET's public source provides settlement-confirmed monthly service-period
-  // accounting, not hourly observations. Confirmed service-month totals are
-  // prorated over their calendar days to create a faithful daily accrual
-  // series without introducing projected/unsettled revenue.
   pullHourly: false,
-
   fetch,
   chains: [CHAIN.OFF_CHAIN],
-  start: "2024-09-29",
+
+  // DeFiLlama treats start as a lower boundary. The first XNET daily accrual
+  // is 2024-09-01, so step back one day to ensure it is included.
+  start: "2024-08-31",
 
   methodology: {
     Fees:
-      "Settlement-confirmed carrier WiFi offload service revenue attributed to the underlying service month and distributed evenly across the calendar days of that service month. Historical daily values can be backfilled when a later carrier settlement confirms an earlier service period. Projected and unsettled revenue is excluded.",
+      "Accrual-basis carrier WiFi offload service fees. Daily values follow measured XNET network offload. Settlement-confirmed service months are reconciled exactly to confirmed carrier revenue and distributed across their actual daily offload pattern. Closed unsettled months use XNET's official projected WiFi revenue provisionally. Newer days use measured offload multiplied by the latest conservative effective revenue-per-API-GB rate, calibrated from the latest complete month and capped at the published blended billing rate. Provisional values are replaced and historically reconciled when official monthly projections or carrier settlements arrive.",
 
     Revenue: "Same as Fees.",
 
@@ -136,7 +121,7 @@ const adapter: SimpleAdapter = {
   breakdownMethodology: {
     Fees: {
       [METRIC.SERVICE_FEES]:
-        "Settlement-confirmed carrier WiFi offload service fees reconciled to the underlying service month and prorated evenly across its calendar days.",
+        "Carrier WiFi offload service fees on a measured-offload accrual basis. Values can be provisional while a service period is unsettled and are later reconciled to the official monthly projection and settlement-confirmed service revenue.",
     },
 
     Revenue: {
