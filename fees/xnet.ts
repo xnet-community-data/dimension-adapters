@@ -107,7 +107,7 @@ const adapter: SimpleAdapter = {
 
   methodology: {
     Fees:
-      "Estimated carrier WiFi offload fees. Until carrier payment arrives, fees are conservatively estimated from daily offload. Carrier payments typically arrive about two months later; when they do, historical estimates are reconciled to the amount actually paid.",
+      "Carriers pay XNET for mobile data offloaded onto WiFi. Until payment arrives, fees are conservatively estimated from daily offload. Payments typically arrive about two months later; historical estimates are then reconciled to the amount actually paid.",
 
     Revenue: "Same as Fees.",
 
