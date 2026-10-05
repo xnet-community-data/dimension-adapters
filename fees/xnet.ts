@@ -8,7 +8,6 @@ const REVENUE_URL =
   "xnet-community-data/xnet-data-integration/main/data/xnet_defillama_revenue.json";
 
 const XIP12_EFFECTIVE_DATE = "2025-05-22";
-const SERVICE_REVENUE_SAFE_THROUGH = "2026-07-31";
 
 const OPERATIONS_REVENUE = "Operations";
 const PROTOCOL_OWNED_LIQUIDITY = "Protocol-owned liquidity";
@@ -18,7 +17,7 @@ interface RevenueRow {
   service_month: string;
   fees_usd: number;
   user_fees_usd: number;
-  payment_received_date: string;
+  payment_received_date: string | null;
 }
 
 interface RevenueFeed {
@@ -27,10 +26,6 @@ interface RevenueFeed {
 }
 
 const fetch = async (options: FetchOptions) => {
-  if (options.dateString > SERVICE_REVENUE_SAFE_THROUGH) {
-    return {};
-  }
-
   const response: RevenueFeed = await fetchURL(REVENUE_URL);
 
   if (!response || !Array.isArray(response.data)) {
@@ -110,13 +105,12 @@ const adapter: SimpleAdapter = {
 
   fetch,
   chains: [CHAIN.OFF_CHAIN],
-  start: "2024-09-30",
+  start: "2024-09-29",
 
   methodology: {
     Fees: "Settlement-confirmed carrier WiFi offload service revenue attributed to the underlying service month and recognized on the final calendar day of that month.",
 
-    Revenue:
-      "Settlement-confirmed carrier WiFi offload service revenue retained within the XNET ecosystem. Revenue is allocated between token-holder value accrual and protocol-controlled uses.",
+    Revenue: "Same as Fees.",
 
     HoldersRevenue:
       "Historically, 80% of carrier revenue was allocated to XNET market buybacks and burns. Under XIP-12, this was split so that 60% continues to fund XNET buyback-and-burn while 20 percentage points were redirected to protocol-owned liquidity to bolster XNET liquidity.",
@@ -132,8 +126,7 @@ const adapter: SimpleAdapter = {
     },
 
     Revenue: {
-      [METRIC.SERVICE_FEES]:
-        "Carrier WiFi offload service revenue retained within the XNET ecosystem.",
+      [METRIC.SERVICE_FEES]: "Same as Fees.",
     },
 
     HoldersRevenue: {
