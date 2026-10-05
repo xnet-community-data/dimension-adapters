@@ -7,37 +7,43 @@ const REVENUE_URL =
   "https://raw.githubusercontent.com/" +
   "xnet-community-data/xnet-data-integration/main/data/xnet_defillama_revenue.json";
 
-const XIP12_EFFECTIVE_DATE = "2025-05-22";
-const SERVICE_REVENUE_SAFE_THROUGH = "2026-07-31";
+const FIAT_DEPLOYER_PAYOUT = "Fiat deployer payouts";
+const PROTOCOL_RETAINED_REVENUE = "Operations and protocol-owned liquidity";
 
-const OPERATIONS_REVENUE = "Operations";
-const PROTOCOL_OWNED_LIQUIDITY = "Protocol-owned liquidity";
-
-interface RevenueRow {
+interface DailyRevenueRow {
   date: string;
   service_month: string;
+  offload_gb: number;
   fees_usd: number;
   user_fees_usd: number;
-  payment_received_date: string;
+  revenue_usd: number;
+  supply_side_revenue_usd: number;
+  holders_revenue_usd: number;
+  protocol_revenue_usd: number;
+  basis: string;
+  rate_usd_per_api_gb?: number;
+  rate_source_month?: string;
 }
 
 interface RevenueFeed {
   schema_version: number;
-  data: RevenueRow[];
+  daily_data: DailyRevenueRow[];
 }
 
 const fetch = async (options: FetchOptions) => {
-  if (options.dateString > SERVICE_REVENUE_SAFE_THROUGH) {
-    return {};
-  }
-
   const response: RevenueFeed = await fetchURL(REVENUE_URL);
 
-  if (!response || !Array.isArray(response.data)) {
-    throw new Error("Unexpected XNET revenue feed response");
+  if (
+    !response ||
+    response.schema_version < 3 ||
+    !Array.isArray(response.daily_data)
+  ) {
+    throw new Error("Unexpected XNET daily revenue feed response");
   }
 
-  const rows = response.data.filter((row) => row.date === options.dateString);
+  const rows = response.daily_data.filter(
+    (row) => row.date === options.dateString,
+  );
 
   const toFiniteNumber = (value: unknown, field: string) => {
     if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -46,55 +52,76 @@ const fetch = async (options: FetchOptions) => {
     return value;
   };
 
-  const feesUsd = rows.reduce(
-    (sum, row) => sum + toFiniteNumber(row.fees_usd, "fees_usd"),
-    0,
-  );
+  const sumField = (field: keyof DailyRevenueRow) =>
+    rows.reduce(
+      (sum, row) => sum + toFiniteNumber(row[field], String(field)),
+      0,
+    );
 
-  const userFeesUsd = rows.reduce(
-    (sum, row) => sum + toFiniteNumber(row.user_fees_usd, "user_fees_usd"),
-    0,
-  );
+  const feesUsd = sumField("fees_usd");
+  const userFeesUsd = sumField("user_fees_usd");
+  const revenueUsd = sumField("revenue_usd");
+  const supplySideRevenueUsd = sumField("supply_side_revenue_usd");
+  const holdersRevenueUsd = sumField("holders_revenue_usd");
+  const protocolRevenueUsd = sumField("protocol_revenue_usd");
 
-  const postXip12 = options.dateString >= XIP12_EFFECTIVE_DATE;
+  const tolerance = 0.02;
 
-  const holdersRevenueUsd = feesUsd * (postXip12 ? 0.6 : 0.8);
+  if (Math.abs(feesUsd - revenueUsd - supplySideRevenueUsd) > tolerance) {
+    throw new Error("XNET feed invariant failed: Fees != Revenue + SupplySideRevenue");
+  }
 
-  const operationsRevenueUsd = feesUsd * 0.2;
-
-  const liquidityRevenueUsd = postXip12 ? feesUsd * 0.2 : 0;
+  if (Math.abs(revenueUsd - holdersRevenueUsd - protocolRevenueUsd) > tolerance) {
+    throw new Error(
+      "XNET feed invariant failed: Revenue != HoldersRevenue + ProtocolRevenue",
+    );
+  }
 
   const dailyFees = options.createBalances();
   const dailyUserFees = options.createBalances();
   const dailyRevenue = options.createBalances();
+  const dailySupplySideRevenue = options.createBalances();
   const dailyHoldersRevenue = options.createBalances();
   const dailyProtocolRevenue = options.createBalances();
 
   if (feesUsd > 0) {
     dailyFees.addUSDValue(feesUsd, METRIC.SERVICE_FEES);
-
-    dailyRevenue.addUSDValue(feesUsd, METRIC.SERVICE_FEES);
-
-    dailyHoldersRevenue.addUSDValue(holdersRevenueUsd, METRIC.TOKEN_BUY_BACK);
-
-    dailyProtocolRevenue.addUSDValue(operationsRevenueUsd, OPERATIONS_REVENUE);
-
-    if (liquidityRevenueUsd > 0) {
-      dailyProtocolRevenue.addUSDValue(
-        liquidityRevenueUsd,
-        PROTOCOL_OWNED_LIQUIDITY,
-      );
-    }
   }
 
   if (userFeesUsd > 0) {
     dailyUserFees.addUSDValue(userFeesUsd, METRIC.SERVICE_FEES);
   }
 
+  if (revenueUsd > 0) {
+    dailyRevenue.addUSDValue(revenueUsd, METRIC.SERVICE_FEES);
+  }
+
+  if (supplySideRevenueUsd > 0) {
+    dailySupplySideRevenue.addUSDValue(
+      supplySideRevenueUsd,
+      FIAT_DEPLOYER_PAYOUT,
+    );
+  }
+
+  if (holdersRevenueUsd > 0) {
+    dailyHoldersRevenue.addUSDValue(
+      holdersRevenueUsd,
+      METRIC.TOKEN_BUY_BACK,
+    );
+  }
+
+  if (protocolRevenueUsd > 0) {
+    dailyProtocolRevenue.addUSDValue(
+      protocolRevenueUsd,
+      PROTOCOL_RETAINED_REVENUE,
+    );
+  }
+
   return {
     dailyFees,
     dailyUserFees,
     dailyRevenue,
+    dailySupplySideRevenue,
     dailyHoldersRevenue,
     dailyProtocolRevenue,
   };
@@ -102,51 +129,55 @@ const fetch = async (options: FetchOptions) => {
 
 const adapter: SimpleAdapter = {
   version: 2,
-
-  // XNET's public source provides monthly service-period accounting,
-  // not hourly observations. Daily execution avoids repeating the same
-  // monthly accrual in each of the day's 24 hourly windows.
   pullHourly: false,
-
   fetch,
   chains: [CHAIN.OFF_CHAIN],
-  start: "2024-09-30",
+
+  // DeFiLlama treats start as a lower boundary. The first XNET daily accrual
+  // is 2024-09-01, so step back one day to ensure it is included.
+  start: "2024-08-31",
 
   methodology: {
-    Fees: "Settlement-confirmed carrier WiFi offload service revenue attributed to the underlying service month and recognized on the final calendar day of that month.",
+    Fees:
+      "Carriers pay XNET for mobile data offloaded onto WiFi. Until payment arrives, fees are conservatively estimated from daily offload. Payments typically arrive about two months later; historical estimates are then reconciled to the amount actually paid.",
 
     Revenue:
-      "Settlement-confirmed carrier WiFi offload service revenue retained within the XNET ecosystem. Revenue is allocated between token-holder value accrual and protocol-controlled uses.",
+      "Carrier fees retained within the XNET ecosystem after payments to deployers who choose fiat compensation.",
+
+    SupplySideRevenue:
+      "Payments to deployers who choose fiat compensation for carrying mobile traffic. For the fiat option, 75% of the gross fiat allocation is paid to the deployer.",
 
     HoldersRevenue:
-      "Historically, 80% of carrier revenue was allocated to XNET market buybacks and burns. Under XIP-12, this was split so that 60% continues to fund XNET buyback-and-burn while 20 percentage points were redirected to protocol-owned liquidity to bolster XNET liquidity.",
+      "Revenue allocated to XNET buyback-and-burn. For the fiat-deployer option, 5% of the gross fiat allocation goes to BBB.",
 
     ProtocolRevenue:
-      "Historically, 20% of carrier revenue was allocated to operations. Under XIP-12, Protocol Revenue is 40%: 20% for protocol-owned liquidity and 20% for operations. The liquidity allocation remains Protocol Revenue even when part of it is used to acquire XNET for the XNET side of protocol-owned liquidity.",
+      "Revenue retained for XNET operations and protocol-owned liquidity. For the fiat-deployer option, 20% of the gross fiat allocation goes to operations.",
   },
 
   breakdownMethodology: {
     Fees: {
       [METRIC.SERVICE_FEES]:
-        "Settlement-confirmed carrier WiFi offload service fees reconciled to the underlying service month.",
+        "Carrier WiFi offload fees estimated from daily offload until settlement, then reconciled to the carrier amount actually paid.",
     },
 
     Revenue: {
       [METRIC.SERVICE_FEES]:
-        "Carrier WiFi offload service revenue retained within the XNET ecosystem.",
+        "Carrier WiFi offload fees after subtracting fiat-deployer payouts.",
+    },
+
+    SupplySideRevenue: {
+      [FIAT_DEPLOYER_PAYOUT]:
+        "Fiat compensation paid to deployers. The fiat option allocates 75% to the deployer, 5% to BBB and 20% to XNET operations; the corresponding token emissions are burned.",
     },
 
     HoldersRevenue: {
       [METRIC.TOKEN_BUY_BACK]:
-        "XNET market buyback-and-burn allocation: historically 80% of carrier revenue, changing under XIP-12 to 60% when 20 percentage points were redirected to bolster protocol-owned liquidity.",
+        "BBB allocation. Ordinary carrier revenue follows the applicable XNET policy, while 5% of each fiat-option gross allocation goes to BBB.",
     },
 
     ProtocolRevenue: {
-      [OPERATIONS_REVENUE]:
-        "20% of carrier revenue allocated to XNET operations in both the historical and XIP-12 regimes.",
-
-      [PROTOCOL_OWNED_LIQUIDITY]:
-        "Under XIP-12, 20% of carrier revenue is allocated to protocol-owned liquidity. This allocation was carved out of the historical 80% buyback-and-burn allocation to bolster XNET liquidity.",
+      [PROTOCOL_RETAINED_REVENUE]:
+        "Operations and protocol-owned-liquidity allocation. The fiat-option slice contributes 20% of its gross allocation to XNET operations.",
     },
   },
 };
