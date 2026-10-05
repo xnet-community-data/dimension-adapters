@@ -107,21 +107,21 @@ const adapter: SimpleAdapter = {
 
   methodology: {
     Fees:
-      "Accrual-basis carrier WiFi offload service fees. Daily values follow measured XNET network offload. Settlement-confirmed service months are reconciled exactly to confirmed carrier revenue and distributed across their actual daily offload pattern. Closed unsettled months use XNET's official projected WiFi revenue provisionally. Newer days use measured offload multiplied by the latest conservative effective revenue-per-API-GB rate, calibrated from the latest complete month and capped at the published blended billing rate. During a short trailing offload-API outage of at most 14 completed days, missing trailing days can be provisionally imputed from the latest seven measured days; those rows are explicitly flagged in the source feed and replaced when measured observations resume. Provisional values are replaced and historically reconciled when official monthly projections or carrier settlements arrive.",
+      "Estimated carrier WiFi offload fees. Until carrier payment arrives, fees are conservatively estimated from daily offload. Carrier payments typically arrive about two months later; when they do, historical estimates are reconciled to the amount actually paid.",
 
     Revenue: "Same as Fees.",
 
     HoldersRevenue:
-      "Historically, 80% of carrier revenue was allocated to XNET market buybacks and burns. Under XIP-12, this was split so that 60% continues to fund XNET buyback-and-burn while 20 percentage points were redirected to protocol-owned liquidity to bolster XNET liquidity.",
+      "Share of carrier revenue allocated to XNET buybacks and burns: historically 80%, and 60% since XIP-12.",
 
     ProtocolRevenue:
-      "Historically, 20% of carrier revenue was allocated to operations. Under XIP-12, Protocol Revenue is 40%: 20% for protocol-owned liquidity and 20% for operations. The liquidity allocation remains Protocol Revenue even when part of it is used to acquire XNET for the XNET side of protocol-owned liquidity.",
+      "Share of carrier revenue retained for operations and protocol-owned liquidity: historically 20%, and 40% since XIP-12.",
   },
 
   breakdownMethodology: {
     Fees: {
       [METRIC.SERVICE_FEES]:
-        "Carrier WiFi offload service fees on a measured-offload accrual basis. Values can be provisional while a service period is unsettled and are later reconciled to the official monthly projection and settlement-confirmed service revenue.",
+        "Carrier WiFi offload fees estimated from daily offload until settlement, then reconciled to the carrier amount actually paid.",
     },
 
     Revenue: {
