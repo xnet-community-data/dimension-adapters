@@ -367,7 +367,7 @@ const adapter: SimpleAdapter = {
       "Passed XIP-13.1 lets designated operators choose fiat instead of token distributions. Their 75% operator cash share is Supply-Side Revenue and is attributed to the service month reconciled by the carrier settlement that funds the payout, preserving the observed NET60+ settlement cadence.",
 
     HoldersRevenue:
-      "Accrued service-period tokenholder allocation. Historically 80% of ordinary carrier Fees accrued to buyback-and-burn; under passed XIP-12, 60% does. The XIP-13.1 fiat slice contributes its 5% facilitation/BBB allocation. Values are provisional wherever the underlying Fees are provisional and reconcile with settlement. This is accrual attribution; actual on-chain buyback or burn execution can occur later.",
+      "Accrued service-period tokenholder allocation. Historically 80% of ordinary carrier Fees accrued to buyback-and-burn; under passed XIP-12, 60% does, while another 20% supports protocol-owned liquidity. The XIP-13.1 fiat slice contributes its 5% facilitation/BBB allocation. Values are provisional wherever the underlying Fees are provisional and reconcile with settlement. This is accrual attribution; actual on-chain buyback or burn execution can occur later.",
 
     ProtocolRevenue:
       "Historically 20% of ordinary carrier Fees was allocated to operations. Under passed XIP-12, Protocol Revenue is 40%: 20% operations and 20% protocol-owned liquidity. For the XIP-13.1 fiat slice, 20% is retained for XNET operations.",
